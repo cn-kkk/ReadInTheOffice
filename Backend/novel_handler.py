@@ -35,6 +35,7 @@ class NovelHandler:
     def load_book_as_string(self, book_filename):
         """
         检测文件编码，并将整个文件一次性解码成一个字符串。
+        根据精确的规则处理空白字符。
         返回 (内容字符串, 错误信息) 的元组。
         """
         book_path = os.path.join(self.books_dir, book_filename)
@@ -46,8 +47,13 @@ class NovelHandler:
         try:
             with open(book_path, 'r', encoding=encoding, errors='ignore') as f:
                 content = f.read()
-            # 清理文本，将所有类型的空白符（换行、空格、制表符等）替换掉
-            processed_content = re.sub(r'\s+', '', content)
+            
+            # 替换规则
+            # 1. 高优先级：将作为段落分隔的连续换行符/回车符或换页符，替换为4个空格
+            processed_content = re.sub(r'(\r\n){2,}|\r{2,}|\n{2,}|\f', '    ', content)
+            # 2. 低优先级：移除剩余的、单个的、破坏排版的换行、回车、制表符和全角空格
+            processed_content = re.sub(r'[\n\r\t　]', '', processed_content)
+            
             return processed_content, None
         except Exception as e:
             return None, f"打开或读取文件时出错: {e}"

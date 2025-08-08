@@ -84,7 +84,7 @@ class MainWindow(QMainWindow):
         # 5. 透明度
         grid_layout.addWidget(QLabel("图层透明度:"), 4, 0)
         self.opacity_spinbox = QDoubleSpinBox()
-        self.opacity_spinbox.setRange(0.1, 1.0)
+        self.opacity_spinbox.setRange(0.0, 1.0)
         self.opacity_spinbox.setSingleStep(0.05) # 将步长调整为0.05
         self.opacity_spinbox.setValue(0.7)
         grid_layout.addWidget(self.opacity_spinbox, 4, 1, 1, 2)
@@ -195,6 +195,11 @@ class MainWindow(QMainWindow):
     def start_reading(self):
         """收集UI设置, 加载小说为字符串, 创建并显示阅读窗口。"""
         # 1. 收集所有UI上的设置
+        # 将RGB颜色和透明度组合成RGBA颜色字符串
+        rgb = self.background_color.getRgb()[:3] # 获取(r, g, b)
+        alpha = self.opacity_spinbox.value()
+        rgba_color = f"rgba({rgb[0]}, {rgb[1]}, {rgb[2]}, {alpha})"
+
         min_modifier = self.minimize_modifier_combo.currentText().lower()
         min_key = self.minimize_key_combo.currentText().lower()
         minimize_hotkey = f"<{min_modifier}>+{min_key}"
@@ -211,9 +216,8 @@ class MainWindow(QMainWindow):
         settings = {
             "selected_book": selected_book,
             "font_size": self.font_size_spinbox.value(),
-            "background_color": self.background_color.name(),
+            "background_color": rgba_color, # 使用组合后的RGBA颜色
             "font_color": self.font_color.name(),
-            "opacity": self.opacity_spinbox.value(),
             "lines_per_page": self.lines_spinbox.value(),
             "chars_per_line": self.chars_spinbox.value(),
             "minimize_hotkey": minimize_hotkey,

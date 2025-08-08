@@ -28,18 +28,29 @@ class ReaderView(QWidget):
 
         # --- 窗口属性设置 ---
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.resize(600, 400)
-        self.setWindowOpacity(self.settings.get("opacity", 0.7))
+        # 移除 Qt.WA_TranslucentBackground，改为设置背景色为完全透明
+        self.setAttribute(Qt.WA_TranslucentBackground, False) # 显式设置为False
+        self.setStyleSheet("background-color: rgba(0,0,0,0);") # 窗口背景完全透明
 
-        # --- UI控件设置 ---
-        self.text_label = QLabel()
+        self.resize(600, 400)
+        # self.setWindowOpacity(self.settings.get("opacity", 0.7)) # 移除这行
+
+        # --- 创建一个可拖动的透明容器 ---
+        # 鼠标事件将绑定到这个容器上
+        self.drag_area = QWidget(self) # 以ReaderView为父级
+        self.drag_area.setStyleSheet("background-color: rgba(0,0,0,0);") # 容器背景也完全透明
+        self.drag_area.setMouseTracking(True) # 启用鼠标跟踪，即使不按键也能收到move事件
+
+        # --- UI控件设置 (text_label现在是drag_area的子控件) ---
+        self.text_label = QLabel(self.drag_area) # text_label现在是drag_area的子控件
         self.text_label.setWordWrap(True)
         self.text_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         font = QFont()
         font.setPointSize(self.settings.get("font_size", 14))
         self.text_label.setFont(font)
-        bg_color = self.settings.get("background_color", "#000000")
+        
+        # 直接使用传入的background_color，它现在是带有alpha通道的rgba字符串
+        bg_color = self.settings.get("background_color", "rgba(0,0,0,0.7)")
         font_color = self.settings.get("font_color", "#FFFFFF")
         self.text_label.setStyleSheet(f'''
             background-color: {bg_color};
@@ -47,10 +58,15 @@ class ReaderView(QWidget):
             padding: 10px; border-radius: 5px;
         ''')
 
-        # --- 布局 ---
-        layout = QVBoxLayout(self)
-        layout.addWidget(self.text_label)
-        layout.setContentsMargins(0, 0, 0, 0)
+        # --- 布局 (主布局现在管理drag_area) ---
+        main_layout = QVBoxLayout(self) # ReaderView的主布局
+        main_layout.addWidget(self.drag_area) # 将可拖动区域添加到主布局
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
+        # drag_area的布局，管理text_label
+        drag_area_layout = QVBoxLayout(self.drag_area)
+        drag_area_layout.addWidget(self.text_label)
+        drag_area_layout.setContentsMargins(0, 0, 0, 0)
 
         # --- 信号连接 ---
         self.toggle_visibility_signal.connect(self.toggle_visibility)
@@ -60,6 +76,26 @@ class ReaderView(QWidget):
         self._drag_start_position = None
         self.update_display()
         self.start_hotkey_listener()
+
+        # 将鼠标事件绑定到drag_area上
+        self.drag_area.mousePressEvent = self._mousePressEvent
+        self.drag_area.mouseMoveEvent = self._mouseMoveEvent
+        self.drag_area.mouseReleaseEvent = self._mouseReleaseEvent
+
+    # 将原来的鼠标事件方法重命名，并作为drag_area的事件处理函数
+    def _mousePressEvent(self, event: QMouseEvent):
+        if event.button() == Qt.LeftButton:
+            self._drag_start_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def _mouseMoveEvent(self, event: QMouseEvent):
+        if event.buttons() == Qt.LeftButton and self._drag_start_position:
+            self.move(event.globalPosition().toPoint() - self._drag_start_position)
+            event.accept()
+
+    def _mouseReleaseEvent(self, event: QMouseEvent):
+        self._drag_start_position = None
+        event.accept()
 
     def update_display(self):
         """根据当前字符索引，从完整字符串中切片、排版并显示内容"""
@@ -119,19 +155,20 @@ class ReaderView(QWidget):
         self.adjustSize()
         self.updateGeometry()
 
-    def mousePressEvent(self, event: QMouseEvent):
-        if event.button() == Qt.LeftButton:
-            self._drag_start_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
+    # 鼠标事件现在绑定到drag_area上
+    # def mousePressEvent(self, event: QMouseEvent):
+    #     if event.button() == Qt.LeftButton:
+    #         self._drag_start_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+    #         event.accept()
 
-    def mouseMoveEvent(self, event: QMouseEvent):
-        if event.buttons() == Qt.LeftButton and self._drag_start_position:
-            self.move(event.globalPosition().toPoint() - self._drag_start_position)
-            event.accept()
+    # def mouseMoveEvent(self, event: QMouseEvent):
+    #     if event.buttons() == Qt.LeftButton and self._drag_start_position:
+    #         self.move(event.globalPosition().toPoint() - self._drag_start_position)
+    #         event.accept()
 
-    def mouseReleaseEvent(self, event: QMouseEvent):
-        self._drag_start_position = None
-        event.accept()
+    # def mouseReleaseEvent(self, event: QMouseEvent):
+    #     self._drag_start_position = None
+    #     event.accept()
 
     def closeEvent(self, event):
         if self.hotkey_listener: self.hotkey_listener.stop()
