@@ -7,7 +7,7 @@ sys.path.append(project_root)
 import qdarkstyle # 把它加回来
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QGridLayout, QHBoxLayout,
-    QComboBox, QLabel, QSpinBox, QPushButton, QDoubleSpinBox,
+    QComboBox, QLabel, QSpinBox, QPushButton, QLineEdit,
     QColorDialog, QKeySequenceEdit
 )
 from PySide6.QtGui import QColor, QPalette, QKeySequence
@@ -30,17 +30,23 @@ class MainWindow(QMainWindow):
         self.novel_handler = NovelHandler()
         self.config_handler = ConfigHandler()
         self.app_settings = self.config_handler.load_settings()
-        self.config_handler = ConfigHandler()
-        self.app_settings = self.config_handler.load_settings()
 
         # --- 窗口基本设置 ---
-        self.setWindowTitle("摸鱼阅读器 - 设置")
+        self.setWindowTitle("有时间还是要多读书 - 丁真")
         self.setFixedSize(400, 550) # 增加了高度以容纳新控件
 
         # --- 中心控件和主布局 ---
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
+
+        # --- 控制按钮 (移动到这里，确保提前初始化) ---
+        self.start_button = QPushButton("启动阅读")
+        self.start_button.setFixedHeight(40)
+        self.start_button.clicked.connect(self.start_reading) # 连接到新的方法
+        self.quit_button = QPushButton("退出程序")
+        self.quit_button.setFixedHeight(40)
+        self.quit_button.clicked.connect(QApplication.instance().quit)
 
         # --- 使用网格布局来对齐控件 ---
         grid_layout = QGridLayout()
@@ -97,11 +103,28 @@ class MainWindow(QMainWindow):
 
         # 5. 透明度
         grid_layout.addWidget(QLabel("图层透明度:"), 4, 0)
-        self.opacity_spinbox = QDoubleSpinBox()
-        self.opacity_spinbox.setRange(0.0, 1.0)
-        self.opacity_spinbox.setSingleStep(0.05)
-        self.opacity_spinbox.setValue(self.app_settings.get("opacity", 0.7))
-        grid_layout.addWidget(self.opacity_spinbox, 4, 1, 1, 2)
+        
+        self.opacity_input = QLineEdit()
+        self.opacity_input.setPlaceholderText("0.01 - 1.00")
+        
+        initial_opacity = self.app_settings.get("opacity", 0.7)
+        self.opacity_input.setText(f"{initial_opacity:.2f}")
+
+        self.opacity_input.textChanged.connect(self._validate_opacity_input)
+
+        opacity_h_layout = QHBoxLayout() # Use a horizontal layout for input and icon
+        opacity_h_layout.addWidget(self.opacity_input)
+
+        # Add exclamation mark icon
+        info_icon = QLabel()
+        info_icon.setText("ⓘ") # Unicode info symbol
+        info_icon.setToolTip("透明度范围: 0.01 到 1.00 (精确到两位小数)")
+        info_icon.setStyleSheet("font-weight: bold; color: white;") # Orange color for info
+
+        opacity_h_layout.addWidget(info_icon)
+        opacity_h_layout.setStretch(0, 1) # Make input box stretch
+
+        grid_layout.addLayout(opacity_h_layout, 4, 1, 1, 2)
 
         # 6. 显示行数
         grid_layout.addWidget(QLabel("显示行数:"), 5, 0)
@@ -226,7 +249,7 @@ class MainWindow(QMainWindow):
         # 1. 收集所有UI上的设置
         # 将RGB颜色和透明度组合成RGBA颜色字符串
         rgb = self.background_color.getRgb()[:3] # 获取(r, g, b)
-        alpha = self.opacity_spinbox.value()
+        alpha = float(self.opacity_input.text())
         rgba_color = f"rgba({rgb[0]}, {rgb[1]}, {rgb[2]}, {alpha})"
 
         min_modifier = self.minimize_modifier_combo.currentText().lower()
@@ -277,7 +300,9 @@ class MainWindow(QMainWindow):
         self.app_settings["font_size"] = settings["font_size"]
         self.app_settings["background_color"] = settings["background_color"]
         self.app_settings["font_color"] = settings["font_color"]
-        self.app_settings["opacity"] = self.opacity_spinbox.value() # 直接从spinbox获取，因为settings里没有这个key
+        alpha = float(self.opacity_input.text())
+        # ...
+        self.app_settings["opacity"] = float(self.opacity_input.text()) # 直接从spinbox获取，因为settings里没有这个key
         self.app_settings["lines_per_page"] = settings["lines_per_page"]
         self.app_settings["chars_per_line"] = settings["chars_per_line"]
         self.app_settings["minimize_hotkey"] = settings["minimize_hotkey"]
@@ -293,6 +318,19 @@ class MainWindow(QMainWindow):
             self.app_settings["progress"] = {}
         self.app_settings["progress"][book_name] = last_char_index
         self.config_handler.save_settings(self.app_settings)
+
+    def _validate_opacity_input(self, text):
+        try:
+            value = float(text)
+            if 0.01 <= value <= 1.00 and round(value * 100) == value * 100:
+                self.opacity_input.setStyleSheet("")
+                self.start_button.setEnabled(True)
+            else:
+                self.opacity_input.setStyleSheet("border: 1px solid red;")
+                self.start_button.setEnabled(False)
+        except ValueError:
+            self.opacity_input.setStyleSheet("border: 1px solid red;")
+            self.start_button.setEnabled(False)
 
 # --- 程序入口 ---
 # 这使得该文件可以被直接运行，方便我们预览UI效果

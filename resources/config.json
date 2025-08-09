@@ -1,15 +1,12 @@
 {
     "font_size": 14,
-    "font_color": "#ffffff",
-    "background_color": "rgba(42, 42, 42, 0.5)",
-    "opacity": 0.5,
-    "lines_per_page": 2,
+    "font_color": "#FFFFFF",
+    "background_color": "#000000",
+    "opacity": 0.7,
+    "lines_per_page": 10,
     "chars_per_line": 40,
     "minimize_hotkey": "<ctrl>+m",
     "close_hotkey": "<alt>+q",
     "paging_hotkey": "\u2190 \u548c \u2192",
-    "progress": {
-        "\u51e1\u4eba\u4e4b\u957f\u751f\u4ed9\u9053.txt": 1797
-    },
-    "last_selected_book": "\u51e1\u4eba\u4e4b\u957f\u751f\u4ed9\u9053.txt"
+    "progress": {}
 }
