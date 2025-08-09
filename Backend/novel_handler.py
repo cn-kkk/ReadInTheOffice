@@ -1,15 +1,19 @@
-# -*- coding: utf-8 -*-
-
 import os
 import re
 import chardet
+import sys
 
 class NovelHandler:
     """
     负责处理小说文件，核心功能是解码并返回完整的字符串内容。
     """
     def __init__(self, books_dir_name="books"):
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        if getattr(sys, 'frozen', False):
+            # 如果是打包后的exe，使用exe所在的目录作为项目根目录
+            project_root = os.path.dirname(sys.executable)
+        else:
+            # 否则，使用当前文件所在目录的上一级作为项目根目录
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
         self.books_dir = os.path.join(project_root, books_dir_name)
         os.makedirs(self.books_dir, exist_ok=True)
 

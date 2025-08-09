@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*- 
-
 import sys
 from threading import Thread
 from pynput import keyboard
@@ -28,9 +26,8 @@ class ReaderView(QWidget):
 
         # --- 窗口属性设置 ---
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
-        # 重新启用 Qt.WA_TranslucentBackground，并设置窗口背景为完全透明
+        # 重新启用 Qt.WA_TranslucentBackground
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setStyleSheet("background-color: rgba(0,0,0,0);") # 窗口背景完全透明
 
         self.resize(600, 400)
 
