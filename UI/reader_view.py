@@ -33,7 +33,7 @@ class ReaderView(QWidget):
 
         # --- UI控件设置 ---
         self.text_label = QLabel(self)
-        self.text_label.setWordWrap(True)
+        self.text_label.setWordWrap(False)
         self.text_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         font = QFont()
         font.setPointSize(self.settings.get("font_size", 14))
@@ -64,16 +64,35 @@ class ReaderView(QWidget):
 
     def update_display(self):
         """根据当前字符索引，从完整字符串中切片、排版并显示内容"""
-        page_content = self.full_content[self.current_char_index : self.current_char_index + self.page_char_count]
+        chars_per_line = self.settings.get("chars_per_line", 40)
+        lines_per_page = self.settings.get("lines_per_page", 10)
+
+        # 计算当前页面应该显示的总字符数
+        max_content_length = chars_per_line * lines_per_page
+
+        # 从完整内容中截取当前页面的原始内容
+        raw_page_content = self.full_content[self.current_char_index : self.current_char_index + max_content_length]
         
-        if not page_content:
+        if not raw_page_content:
             self.text_label.setText("(已到末尾)")
             return
 
-        chars_per_line = self.settings.get("chars_per_line", 40)
-        lines = [page_content[i:i+chars_per_line] for i in range(0, len(page_content), chars_per_line)]
+        displayed_lines = []
+        current_pos = 0
+        # 循环生成指定数量的行
+        for _ in range(lines_per_page):
+            if current_pos < len(raw_page_content):
+                # 截取当前行的内容
+                line_content = raw_page_content[current_pos : current_pos + chars_per_line]
+                # 填充空格，确保每行都达到 chars_per_line 的长度
+                displayed_lines.append(line_content.ljust(chars_per_line))
+                current_pos += chars_per_line
+            else:
+                # 如果内容不足，用空行（填充空格）补齐剩余的行数
+                displayed_lines.append(" " * chars_per_line)
         
-        self.text_label.setText("\n".join(lines))
+        # 将所有行用换行符连接并设置到 QLabel
+        self.text_label.setText("\n".join(displayed_lines))
 
     def next_page(self):
         next_index = self.current_char_index + self.page_char_count
