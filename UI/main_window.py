@@ -1,5 +1,6 @@
 import sys
 import os
+from datetime import datetime
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(project_root)
@@ -8,10 +9,10 @@ import qdarkstyle # 把它加回来
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QGridLayout, QHBoxLayout,
     QComboBox, QLabel, QSpinBox, QPushButton, QLineEdit,
-    QColorDialog, QKeySequenceEdit
+    QColorDialog
 )
-from PySide6.QtGui import QColor, QPalette, QKeySequence
-from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
+from PySide6.QtCore import Qt, QTimer
 
 # --- 后端模块导入 ---
 from Backend.novel_handler import NovelHandler
@@ -23,6 +24,9 @@ class MainWindow(QMainWindow):
     主设置窗口。
     用户在此配置所有参数，然后启动阅读窗口。
     """
+    MINIMUM_DRAGGABLE_OPACITY = 1 / 255
+    PROGRESS_AUTOSAVE_INTERVAL_MS = 10_000
+
     def __init__(self):
         super().__init__()
 
@@ -30,6 +34,13 @@ class MainWindow(QMainWindow):
         self.novel_handler = NovelHandler()
         self.config_handler = ConfigHandler()
         self.app_settings = self.config_handler.load_settings()
+        self.reader_view = None
+        self._has_readable_books = False
+        self._opacity_is_valid = True
+        self._progress_dirty = False
+        self._progress_autosave_timer = QTimer(self)
+        self._progress_autosave_timer.setInterval(self.PROGRESS_AUTOSAVE_INTERVAL_MS)
+        self._progress_autosave_timer.timeout.connect(self._autosave_progress)
 
         # --- 窗口基本设置 ---
         self.setWindowTitle("有时间还是要多读书 - 丁真")
@@ -39,14 +50,6 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
-
-        # --- 控制按钮 (移动到这里，确保提前初始化) ---
-        self.start_button = QPushButton("启动阅读")
-        self.start_button.setFixedHeight(40)
-        self.start_button.clicked.connect(self.start_reading) # 连接到新的方法
-        self.quit_button = QPushButton("退出程序")
-        self.quit_button.setFixedHeight(40)
-        self.quit_button.clicked.connect(QApplication.instance().quit)
 
         # --- 使用网格布局来对齐控件 ---
         grid_layout = QGridLayout()
@@ -105,7 +108,7 @@ class MainWindow(QMainWindow):
         grid_layout.addWidget(QLabel("图层透明度:"), 4, 0)
         
         self.opacity_input = QLineEdit()
-        self.opacity_input.setPlaceholderText("0.01 - 1.00")
+        self.opacity_input.setPlaceholderText("0.00 - 1.00")
         
         initial_opacity = self.app_settings.get("opacity", 0.7)
         self.opacity_input.setText(f"{initial_opacity:.2f}")
@@ -118,7 +121,7 @@ class MainWindow(QMainWindow):
         # Add exclamation mark icon
         info_icon = QLabel()
         info_icon.setText("ⓘ") # Unicode info symbol
-        info_icon.setToolTip("透明度范围: 0.01 到 1.00 (精确到两位小数)")
+        info_icon.setToolTip("透明度范围: 0.00 到 1.00 (精确到两位小数)")
         info_icon.setStyleSheet("font-weight: bold; color: white;") # Orange color for info
 
         opacity_h_layout.addWidget(info_icon)
@@ -206,6 +209,7 @@ class MainWindow(QMainWindow):
         self.quit_button = QPushButton("退出程序")
         self.quit_button.setFixedHeight(40)
         self.quit_button.clicked.connect(QApplication.instance().quit)
+        self._validate_opacity_input(self.opacity_input.text())
 
         # --- 将布局添加到主布局中 ---
         main_layout.addLayout(grid_layout)
@@ -213,13 +217,10 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.start_button)
         main_layout.addWidget(self.quit_button)
 
-        # --- 存储颜色值的变量 ---
-        self.background_color = QColor('#000000')
-        self.font_color = QColor('#FFFFFF')
-
     def load_books_to_selector(self):
         """从后端加载书籍列表并更新到下拉框"""
         book_list = self.novel_handler.get_all_books_names()
+        self._has_readable_books = bool(book_list)
         if book_list:
             self.book_selector.addItems(book_list)
         else:
@@ -246,11 +247,16 @@ class MainWindow(QMainWindow):
 
     def start_reading(self):
         """收集UI设置, 加载小说为字符串, 创建并显示阅读窗口。"""
+        if self.reader_view is not None or not self._has_readable_books:
+            return
+
         # 1. 收集所有UI上的设置
         # 将RGB颜色和透明度组合成RGBA颜色字符串
         rgb = self.background_color.getRgb()[:3] # 获取(r, g, b)
-        alpha = float(self.opacity_input.text())
-        rgba_color = f"rgba({rgb[0]}, {rgb[1]}, {rgb[2]}, {alpha})"
+        requested_opacity = float(self.opacity_input.text())
+        # 完全透明的分层窗口无法接收空白区域的鼠标事件。
+        render_opacity = max(requested_opacity, self.MINIMUM_DRAGGABLE_OPACITY)
+        rgba_color = f"rgba({rgb[0]}, {rgb[1]}, {rgb[2]}, {render_opacity})"
 
         min_modifier = self.minimize_modifier_combo.currentText().lower()
         min_key = self.minimize_key_combo.currentText().lower()
@@ -262,13 +268,13 @@ class MainWindow(QMainWindow):
 
         selected_book = self.book_selector.currentText()
         if selected_book == "books文件夹为空":
-            print("没有可读的书籍。")
             return
 
         settings = {
             "selected_book": selected_book,
             "font_size": self.font_size_spinbox.value(),
             "background_color": rgba_color, # 使用组合后的RGBA颜色
+            "opacity": requested_opacity,
             "font_color": self.font_color.name(),
             "lines_per_page": self.lines_spinbox.value(),
             "chars_per_line": self.chars_spinbox.value(),
@@ -278,19 +284,25 @@ class MainWindow(QMainWindow):
         }
 
         # 2. 加载小说内容为完整字符串
-        full_content, error_msg = self.novel_handler.load_book_as_string(selected_book)
+        full_content, book_sha256, error_msg = self.novel_handler.load_book_with_metadata(selected_book)
         if error_msg:
-            print(error_msg)
             return
 
         # 3. 获取这本书的起始阅读字符索引
-        progress = self.app_settings.get("progress", {})
-        start_char_index = progress.get(selected_book, 0)
+        start_char_index = self._get_start_char_index(
+            selected_book,
+            book_sha256,
+            len(full_content),
+            settings["chars_per_line"] * settings["lines_per_page"],
+        )
         settings["start_char_index"] = start_char_index
+        settings["book_sha256"] = book_sha256
 
         # 4. 创建和显示ReaderView
         self.reader_view = ReaderView(settings, full_content)
+        self.reader_view.progress_changed.connect(self.on_reader_progress_changed)
         self.reader_view.closed.connect(self.on_reader_closed)
+        self._refresh_start_button()
         self.reader_view.show()
         self.reader_view.activateWindow()
         self.reader_view.setFocus()
@@ -300,37 +312,95 @@ class MainWindow(QMainWindow):
         self.app_settings["font_size"] = settings["font_size"]
         self.app_settings["background_color"] = settings["background_color"]
         self.app_settings["font_color"] = settings["font_color"]
-        alpha = float(self.opacity_input.text())
-        # ...
-        self.app_settings["opacity"] = float(self.opacity_input.text()) # 直接从spinbox获取，因为settings里没有这个key
+        self.app_settings["opacity"] = settings["opacity"]
         self.app_settings["lines_per_page"] = settings["lines_per_page"]
         self.app_settings["chars_per_line"] = settings["chars_per_line"]
         self.app_settings["minimize_hotkey"] = settings["minimize_hotkey"]
         self.app_settings["close_hotkey"] = settings["close_hotkey"]
         self.app_settings["paging_hotkey"] = settings["paging_hotkey"]
         self.app_settings["last_selected_book"] = settings["selected_book"]
-        self.config_handler.save_settings(self.app_settings)
+        self._save_app_settings()
 
-    def on_reader_closed(self, book_name, last_char_index):
-        """当阅读窗口关闭时，保存阅读进度。"""
-        print(f"保存进度: 书籍 '{book_name}'，字符位置 {last_char_index}")
-        if "progress" not in self.app_settings:
-            self.app_settings["progress"] = {}
-        self.app_settings["progress"][book_name] = last_char_index
-        self.config_handler.save_settings(self.app_settings)
+    def _get_start_char_index(self, book_name, book_sha256, content_length, page_char_count):
+        progress_entry = self.app_settings.get("progress", {}).get(book_name)
+        if isinstance(progress_entry, dict):
+            if progress_entry.get("sha256") != book_sha256:
+                return 0
+            saved_char_index = progress_entry.get("char_index", 0)
+        elif isinstance(progress_entry, int):
+            # 兼容旧版仅保存字符索引的配置，用户再次阅读后会迁移为新结构。
+            saved_char_index = progress_entry
+        else:
+            return 0
+
+        try:
+            saved_char_index = int(saved_char_index)
+        except (TypeError, ValueError):
+            return 0
+
+        max_start_index = max(0, content_length - page_char_count)
+        return max(0, min(saved_char_index, max_start_index))
+
+    def _update_progress(self, book_name, book_sha256, char_index):
+        self.app_settings.setdefault("progress", {})[book_name] = {
+            "sha256": book_sha256,
+            "char_index": char_index,
+            "last_read": datetime.now().astimezone().isoformat(timespec="seconds"),
+        }
+        self._progress_dirty = True
+
+    def on_reader_progress_changed(self, book_name, book_sha256, char_index):
+        """在翻页后更新内存进度，并启动周期性自动保存。"""
+        self._update_progress(book_name, book_sha256, char_index)
+        if not self._progress_autosave_timer.isActive():
+            self._progress_autosave_timer.start()
+
+    def _autosave_progress(self):
+        if not self._progress_dirty:
+            self._progress_autosave_timer.stop()
+            return
+        if self._save_app_settings():
+            self._progress_dirty = False
+        else:
+            self._progress_autosave_timer.stop()
+
+    def on_reader_closed(self, book_name, book_sha256, last_char_index):
+        """当阅读窗口关闭时，立即保存最终阅读进度。"""
+        self._update_progress(book_name, book_sha256, last_char_index)
+        self._progress_autosave_timer.stop()
+        if self._save_app_settings():
+            self._progress_dirty = False
+        self.reader_view = None
+        self._refresh_start_button()
+
+    def _save_app_settings(self):
+        try:
+            self.config_handler.save_settings(self.app_settings)
+            return True
+        except OSError:
+            return False
+
+    def _refresh_start_button(self):
+        is_reading = self.reader_view is not None
+        self.start_button.setText("阅读中" if is_reading else "启动阅读")
+        self.start_button.setEnabled(
+            self._has_readable_books and self._opacity_is_valid and not is_reading
+        )
 
     def _validate_opacity_input(self, text):
         try:
             value = float(text)
-            if 0.01 <= value <= 1.00 and round(value * 100) == value * 100:
+            if 0.00 <= value <= 1.00 and round(value * 100) == value * 100:
                 self.opacity_input.setStyleSheet("")
-                self.start_button.setEnabled(True)
+                self._opacity_is_valid = True
             else:
                 self.opacity_input.setStyleSheet("border: 1px solid red;")
-                self.start_button.setEnabled(False)
+                self._opacity_is_valid = False
         except ValueError:
             self.opacity_input.setStyleSheet("border: 1px solid red;")
-            self.start_button.setEnabled(False)
+            self._opacity_is_valid = False
+        if hasattr(self, "start_button"):
+            self._refresh_start_button()
 
 # --- 程序入口 ---
 # 这使得该文件可以被直接运行，方便我们预览UI效果

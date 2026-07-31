@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 
 class ConfigHandler:
     """
@@ -8,12 +9,31 @@ class ConfigHandler:
     def __init__(self, config_dir="resources", config_filename="config.json"):
         """
         初始化配置处理器。
-        会自动计算出项目根目录下的resources/config.json的绝对路径。
+        开发环境使用项目根目录下的resources/config.json；
+        打包后的应用使用当前用户的本地应用数据目录。
         """
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-        self.config_path = os.path.join(project_root, config_dir, config_filename)
+        if getattr(sys, 'frozen', False):
+            local_app_data = os.getenv("LOCALAPPDATA")
+            if local_app_data:
+                config_root = os.path.join(local_app_data, "ReadInTheOffice")
+            else:
+                config_root = os.path.join(os.path.expanduser("~"), ".ReadInTheOffice")
+            self.config_path = os.path.join(config_root, config_filename)
+        else:
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+            self.config_path = os.path.join(project_root, config_dir, config_filename)
+
         # 确保配置目录存在
         os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
+        self.temp_config_path = f"{self.config_path}.tmp"
+        self._remove_stale_temp_file()
+
+    def _remove_stale_temp_file(self):
+        """移除上次异常中断时未替换成功的临时配置文件。"""
+        try:
+            os.remove(self.temp_config_path)
+        except FileNotFoundError:
+            pass
 
     def get_default_settings(self):
         """
@@ -63,7 +83,14 @@ class ConfigHandler:
 
     def save_settings(self, settings):
         """
-        将给定的设置字典保存到config.json文件。
+        将给定设置保存到config.json文件。
         """
-        with open(self.config_path, 'w', encoding='utf-8') as f:
-            json.dump(settings, f, indent=4)
+        try:
+            with open(self.temp_config_path, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, indent=4)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(self.temp_config_path, self.config_path)
+        except Exception:
+            self._remove_stale_temp_file()
+            raise

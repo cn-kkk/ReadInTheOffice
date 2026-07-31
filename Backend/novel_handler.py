@@ -1,3 +1,4 @@
+import hashlib
 import os
 import re
 import chardet
@@ -36,28 +37,29 @@ class NovelHandler:
         except (FileNotFoundError, IndexError):
             return 'utf-8'
 
-    def load_book_as_string(self, book_filename):
+    def load_book_with_metadata(self, book_filename):
         """
-        检测文件编码，并将整个文件一次性解码成一个字符串。
+        检测文件编码，将整个文件解码成字符串，并计算原始文件的SHA-256。
         根据精确的规则处理空白字符。
-        返回 (内容字符串, 错误信息) 的元组。
+        返回 (内容字符串, SHA-256, 错误信息) 的元组。
         """
         book_path = os.path.join(self.books_dir, book_filename)
         if not os.path.exists(book_path):
-            return None, f"错误：找不到文件 {book_filename}"
+            return None, None, f"错误：找不到文件 {book_filename}"
 
         encoding = self._detect_encoding(book_path)
-        
+
         try:
-            with open(book_path, 'r', encoding=encoding, errors='ignore') as f:
-                content = f.read()
-            
+            with open(book_path, 'rb') as f:
+                raw_content = f.read()
+
+            content = raw_content.decode(encoding, errors='ignore')
             # 替换规则
             # 1. 高优先级：将作为段落分隔的连续换行符/回车符或换页符，替换为4个空格
             processed_content = re.sub(r'(\r\n){2,}|\r{2,}|\n{2,}|\f', '    ', content)
             # 2. 低优先级：移除剩余的、单个的、破坏排版的换行、回车、制表符和全角空格
             processed_content = re.sub(r'[\n\r\t　]', '', processed_content)
-            
-            return processed_content, None
+
+            return processed_content, hashlib.sha256(raw_content).hexdigest(), None
         except Exception as e:
-            return None, f"打开或读取文件时出错: {e}"
+            return None, None, f"打开或读取文件时出错: {e}"

@@ -1,8 +1,7 @@
-import sys
 from threading import Thread
 from pynput import keyboard
-from PySide6.QtWidgets import QApplication, QWidget, QLabel, QVBoxLayout
-from PySide6.QtCore import Qt, QPoint, Signal, Slot
+from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout
+from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtGui import QKeyEvent, QMouseEvent, QFont
 
 class ReaderView(QWidget):
@@ -12,7 +11,8 @@ class ReaderView(QWidget):
     # 定义信号
     toggle_visibility_signal = Signal()
     close_signal = Signal()
-    closed = Signal(str, int) # 关闭时发出，参数为(书名, 字符索引)
+    progress_changed = Signal(str, str, int) # 参数为(书名, SHA-256, 字符索引)
+    closed = Signal(str, str, int) # 关闭时发出，参数为(书名, SHA-256, 字符索引)
 
     def __init__(self, settings, full_content):
         super().__init__()
@@ -33,6 +33,7 @@ class ReaderView(QWidget):
 
         # --- UI控件设置 ---
         self.text_label = QLabel(self)
+        self.text_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.text_label.setWordWrap(False)
         self.text_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         font = QFont()
@@ -99,12 +100,21 @@ class ReaderView(QWidget):
         if next_index < len(self.full_content):
             self.current_char_index = next_index
             self.update_display()
+            self._emit_progress()
 
     def prev_page(self):
         prev_index = self.current_char_index - self.page_char_count
         if prev_index >= 0:
             self.current_char_index = prev_index
             self.update_display()
+            self._emit_progress()
+
+    def _emit_progress(self):
+        self.progress_changed.emit(
+            self.settings.get("selected_book", ""),
+            self.settings.get("book_sha256", ""),
+            self.current_char_index,
+        )
 
     def start_hotkey_listener(self):
         minimize_hotkey_str = self.settings.get("minimize_hotkey", "<ctrl>+m")
@@ -159,6 +169,10 @@ class ReaderView(QWidget):
 
     def closeEvent(self, event):
         if self.hotkey_listener: self.hotkey_listener.stop()
-        self.closed.emit(self.settings.get("selected_book", ""), self.current_char_index)
+        self.closed.emit(
+            self.settings.get("selected_book", ""),
+            self.settings.get("book_sha256", ""),
+            self.current_char_index,
+        )
         self.deleteLater()
         event.accept()
