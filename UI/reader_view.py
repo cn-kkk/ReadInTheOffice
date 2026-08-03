@@ -28,6 +28,7 @@ class ReaderView(QWidget):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         # 重新启用 Qt.WA_TranslucentBackground
         self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setFocusPolicy(Qt.StrongFocus)
 
         self.resize(600, 400)
 
@@ -135,12 +136,26 @@ class ReaderView(QWidget):
 
     def keyPressEvent(self, event: QKeyEvent):
         paging_style = self.settings.get("paging_hotkey", "← 和 →")
+        handled = False
         if paging_style == "← 和 →":
-            if event.key() == Qt.Key_Right: self.next_page()
-            elif event.key() == Qt.Key_Left: self.prev_page()
+            if event.key() == Qt.Key_Right:
+                self.next_page()
+                handled = True
+            elif event.key() == Qt.Key_Left:
+                self.prev_page()
+                handled = True
         elif paging_style == "A 和 D":
-            if event.key() == Qt.Key_D: self.next_page()
-            elif event.key() == Qt.Key_A: self.prev_page()
+            if event.key() == Qt.Key_D:
+                self.next_page()
+                handled = True
+            elif event.key() == Qt.Key_A:
+                self.prev_page()
+                handled = True
+
+        if handled:
+            event.accept()
+        else:
+            super().keyPressEvent(event)
 
     def showEvent(self, event: QKeyEvent):
         """窗口显示时，强制刷新尺寸和布局。"""

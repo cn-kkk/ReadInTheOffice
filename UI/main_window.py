@@ -9,10 +9,10 @@ import qdarkstyle # 把它加回来
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QGridLayout, QHBoxLayout,
     QComboBox, QLabel, QSpinBox, QPushButton, QLineEdit,
-    QColorDialog
+    QColorDialog, QMessageBox, QMenu, QSystemTrayIcon
 )
-from PySide6.QtGui import QColor
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QAction, QColor, QIcon
+from PySide6.QtCore import QEvent, Qt, QTimer
 
 # --- 后端模块导入 ---
 from Backend.novel_handler import NovelHandler
@@ -38,9 +38,12 @@ class MainWindow(QMainWindow):
         self._has_readable_books = False
         self._opacity_is_valid = True
         self._progress_dirty = False
+        self._is_exiting = False
         self._progress_autosave_timer = QTimer(self)
         self._progress_autosave_timer.setInterval(self.PROGRESS_AUTOSAVE_INTERVAL_MS)
         self._progress_autosave_timer.timeout.connect(self._autosave_progress)
+
+        self._setup_tray_icon()
 
         # --- 窗口基本设置 ---
         self.setWindowTitle("有时间还是要多读书 - 丁真")
@@ -115,16 +118,8 @@ class MainWindow(QMainWindow):
 
         self.opacity_input.textChanged.connect(self._validate_opacity_input)
 
-        opacity_h_layout = QHBoxLayout() # Use a horizontal layout for input and icon
+        opacity_h_layout = QHBoxLayout() # Use a horizontal layout for the input
         opacity_h_layout.addWidget(self.opacity_input)
-
-        # Add exclamation mark icon
-        info_icon = QLabel()
-        info_icon.setText("ⓘ") # Unicode info symbol
-        info_icon.setToolTip("透明度范围: 0.00 到 1.00 (精确到两位小数)")
-        info_icon.setStyleSheet("font-weight: bold; color: white;") # Orange color for info
-
-        opacity_h_layout.addWidget(info_icon)
         opacity_h_layout.setStretch(0, 1) # Make input box stretch
 
         grid_layout.addLayout(opacity_h_layout, 4, 1, 1, 2)
@@ -208,7 +203,7 @@ class MainWindow(QMainWindow):
         self.start_button.clicked.connect(self.start_reading) # 连接到新的方法
         self.quit_button = QPushButton("退出程序")
         self.quit_button.setFixedHeight(40)
-        self.quit_button.clicked.connect(QApplication.instance().quit)
+        self.quit_button.clicked.connect(self._exit_application)
         self._validate_opacity_input(self.opacity_input.text())
 
         # --- 将布局添加到主布局中 ---
@@ -216,6 +211,52 @@ class MainWindow(QMainWindow):
         main_layout.addStretch() # 添加一个伸缩弹簧，让按钮靠下
         main_layout.addWidget(self.start_button)
         main_layout.addWidget(self.quit_button)
+
+    def _setup_tray_icon(self):
+        self._tray_available = QSystemTrayIcon.isSystemTrayAvailable()
+        self.tray_icon = QSystemTrayIcon(self)
+        app_icon = QApplication.instance().windowIcon()
+        if app_icon.isNull():
+            app_icon = QIcon(os.path.join(project_root, "resources", "book.png"))
+        self.tray_icon.setIcon(app_icon)
+        self.tray_icon.setToolTip("Read In The Office")
+
+        tray_menu = QMenu(self)
+        restore_action = QAction("还原", self)
+        restore_action.triggered.connect(self._restore_from_tray)
+        exit_action = QAction("退出", self)
+        exit_action.triggered.connect(self._exit_application)
+        tray_menu.addAction(restore_action)
+        tray_menu.addAction(exit_action)
+
+        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.activated.connect(self._on_tray_activated)
+        self.tray_icon.hide()
+
+    def _minimize_to_tray(self):
+        if self._is_exiting or not self.isMinimized():
+            return
+        if not self._tray_available:
+            return
+        self.tray_icon.show()
+        self.hide()
+
+    def _restore_from_tray(self):
+        self.tray_icon.hide()
+        self.showNormal()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.setFocus()
+
+    def _on_tray_activated(self, reason):
+        if reason == QSystemTrayIcon.DoubleClick:
+            self._restore_from_tray()
+
+    def _exit_application(self):
+        self._is_exiting = True
+        self.tray_icon.hide()
+        self.close()
 
     def load_books_to_selector(self):
         """从后端加载书籍列表并更新到下拉框"""
@@ -266,6 +307,14 @@ class MainWindow(QMainWindow):
         close_key = self.close_key_combo.currentText().lower()
         close_hotkey = f"<{close_modifier}>+{close_key}"
 
+        if minimize_hotkey == close_hotkey:
+            QMessageBox.warning(
+                self,
+                "快捷键冲突",
+                "最小化和关闭图层不能使用相同的快捷键。",
+            )
+            return
+
         selected_book = self.book_selector.currentText()
         if selected_book == "books文件夹为空":
             return
@@ -286,6 +335,7 @@ class MainWindow(QMainWindow):
         # 2. 加载小说内容为完整字符串
         full_content, book_sha256, error_msg = self.novel_handler.load_book_with_metadata(selected_book)
         if error_msg:
+            QMessageBox.critical(self, "读取小说失败", error_msg)
             return
 
         # 3. 获取这本书的起始阅读字符索引
@@ -338,7 +388,12 @@ class MainWindow(QMainWindow):
         except (TypeError, ValueError):
             return 0
 
-        max_start_index = max(0, content_length - page_char_count)
+        if content_length <= 0 or page_char_count <= 0:
+            return 0
+
+        # 最后一页即使不足一整页也要保留，例如1000字、每页400字时，
+        # 合法的页面起点是0、400、800，而不是把800截回600。
+        max_start_index = ((content_length - 1) // page_char_count) * page_char_count
         return max(0, min(saved_char_index, max_start_index))
 
     def _update_progress(self, book_name, book_sha256, char_index):
@@ -401,6 +456,19 @@ class MainWindow(QMainWindow):
             self._opacity_is_valid = False
         if hasattr(self, "start_button"):
             self._refresh_start_button()
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.WindowStateChange and self.isMinimized():
+            QTimer.singleShot(0, self._minimize_to_tray)
+
+    def closeEvent(self, event):
+        self._is_exiting = True
+        self.tray_icon.hide()
+        self._progress_autosave_timer.stop()
+        if self.reader_view is not None:
+            self.reader_view.close()
+        event.accept()
 
 # --- 程序入口 ---
 # 这使得该文件可以被直接运行，方便我们预览UI效果
